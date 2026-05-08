@@ -1,6 +1,7 @@
 # keyboards/inline.py
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from config import COURSES
+from aiogram.types.web_app_info import WebAppInfo
+from config import COURSES, WEBAPP_URL, COMMON_CHAT_URL
 
 def role_keyboard():
     builder = InlineKeyboardBuilder()
@@ -24,4 +25,11 @@ def courses_keyboard():
 def close_topic_keyboard(user_id: int):
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Завершить диалог", callback_data=f"close_{user_id}")
+    return builder.as_markup()
+
+def main_inline_menu():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🗓 Расписание (Web App)", web_app=WebAppInfo(url=WEBAPP_URL))
+    builder.button(text="💬 Общий чат", url=COMMON_CHAT_URL)
+    builder.adjust(1)
     return builder.as_markup()
