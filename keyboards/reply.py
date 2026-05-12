@@ -1,11 +1,17 @@
 # keyboards/reply.py
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.types.web_app_info import WebAppInfo
-from config import WEBAPP_URL
 
-def main_menu():
+def main_menu(user_roles: list = None):
+    if user_roles is None:
+        user_roles = []
+
     kb = [
         [KeyboardButton(text="📱 Главное меню / Направления")],
-        [KeyboardButton(text="🗓 Расписание (Web App)", web_app=WebAppInfo(url=WEBAPP_URL))]
+        [KeyboardButton(text="🆔 Узнать свой ID")]
     ]
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Нажмите на кнопку ниже")
+
+    if "Родитель" in user_roles:
+        kb.append([KeyboardButton(text="👨‍👧 Мои дети"), KeyboardButton(text="💳 Оплата")])
+        kb.append([KeyboardButton(text="🔗 Привязать ребенка"), KeyboardButton(text="📨 Обратная связь")])
+
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Выберите действие")

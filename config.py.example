@@ -2,14 +2,19 @@ TOKEN = "YOUR_BOT_TOKEN_HERE"
 GROUP_ID = -1001234567890 # ID of your manager/admin group
 ADMIN_IDS = [123456789, 987654321] # IDs of admins who can edit schedule
 
-WEBAPP_PORT = 8080
-WEBAPP_URL = "https://your-domain.com/webapp"
+GOOGLE_SCHEDULE_URL = "https://docs.google.com/spreadsheets/d/your_schedule_id"
 COMMON_CHAT_URL = "https://t.me/+your_chat_invite_link"
 
 COURSES = {
-    "math": "Математика 🧮",
-    "programming": "Программирование 💻",
-    "english": "Английский язык 🇬🇧"
+    "math_remedial": "Математика. Устранение пробелов",
+    "python": "Программирование Python",
+    "pc_literacy": "Компьютерная грамотность",
+    "math_exam": "Математика. Подготовка ОГЭ, ЕГЭ",
+    "scratch": "Программирование Scratch",
+    "design": "Графический дизайн",
+    "it_exam": "Информатика. Подготовка ОГЭ, ЕГЭ",
+    "roblox": "Создание игр Roblox",
+    "blender": "3D Моделирование Blender"
 }
 
 SPECIAL_OFFERS = {

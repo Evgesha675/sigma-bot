@@ -7,6 +7,16 @@ from keyboards.inline import close_topic_keyboard
 # ВОТ ЭТА СТРОКА БЫЛА ПОТЕРЯНА. Она должна быть перед всеми @router...
 router = Router()
 
+from aiogram.filters import Command
+
+# Команда /schedule для групп
+@router.message(Command("schedule"))
+async def schedule_command(message: types.Message):
+    if message.chat.type in ["group", "supergroup"]:
+        # Можно дополнить логику, чтобы выдавать расписание конкретно для этой группы
+        from config import GOOGLE_SCHEDULE_URL
+        await message.answer(f"🗓 <b>Расписание группы:</b>\n{GOOGLE_SCHEDULE_URL}", parse_mode="HTML")
+
 # От клиента -> в группу (в топик)
 @router.message(F.chat.id != GROUP_ID)
 async def from_client(message: types.Message):
