@@ -7,16 +7,15 @@ cursor = conn.cursor()
 def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS threads 
                       (user_id INTEGER PRIMARY KEY, thread_id INTEGER)''')
-    # НОВОЕ: Таблица пользователей для запоминания роли
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
-                      (user_id INTEGER PRIMARY KEY, role TEXT)''')
-    # Таблица расписаний
-    cursor.execute('''CREATE TABLE IF NOT EXISTS schedules
-                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       day TEXT,
-                       time TEXT,
-                       subject TEXT,
-                       teacher TEXT)''')
+
+    # Таблица для хранения ролей пользователей. Один юзер - несколько ролей
+    cursor.execute('''CREATE TABLE IF NOT EXISTS user_roles
+                      (user_id INTEGER, role TEXT, PRIMARY KEY (user_id, role))''')
+
+    # Таблица привязки детей к родителям
+    cursor.execute('''CREATE TABLE IF NOT EXISTS parent_child
+                      (parent_id INTEGER, child_id INTEGER, PRIMARY KEY (parent_id, child_id))''')
+
     conn.commit()
 
 # --- Функции потоков (топиков) ---
@@ -38,26 +37,28 @@ def delete_thread(user_id: int):
     cursor.execute("DELETE FROM threads WHERE user_id = ?", (user_id,))
     conn.commit()
 
-# --- НОВОЕ: Функции пользователей ---
-def save_user(user_id: int, role: str):
-    cursor.execute("INSERT OR REPLACE INTO users VALUES (?, ?)", (user_id, role))
+# --- Функции ролей пользователей ---
+def add_user_role(user_id: int, role: str):
+    cursor.execute("INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)", (user_id, role))
     conn.commit()
 
-def get_user_role(user_id: int):
-    cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
-    res = cursor.fetchone()
-    return res[0] if res else None
+def get_user_roles(user_id: int):
+    cursor.execute("SELECT role FROM user_roles WHERE user_id = ?", (user_id,))
+    return [row[0] for row in cursor.fetchall()]
 
-# --- Функции расписания ---
-def add_schedule(day: str, time: str, subject: str, teacher: str):
-    cursor.execute("INSERT INTO schedules (day, time, subject, teacher) VALUES (?, ?, ?, ?)",
-                   (day, time, subject, teacher))
+def clear_user_roles(user_id: int):
+    cursor.execute("DELETE FROM user_roles WHERE user_id = ?", (user_id,))
     conn.commit()
 
-def get_schedules():
-    cursor.execute("SELECT id, day, time, subject, teacher FROM schedules")
-    columns = [column[0] for column in cursor.description]
-    results = []
-    for row in cursor.fetchall():
-        results.append(dict(zip(columns, row)))
-    return results
+# --- Функции связей родитель-ребенок ---
+def link_parent_child(parent_id: int, child_id: int):
+    cursor.execute("INSERT OR IGNORE INTO parent_child (parent_id, child_id) VALUES (?, ?)", (parent_id, child_id))
+    conn.commit()
+
+def get_children(parent_id: int):
+    cursor.execute("SELECT child_id FROM parent_child WHERE parent_id = ?", (parent_id,))
+    return [row[0] for row in cursor.fetchall()]
+
+def is_child_linked(parent_id: int, child_id: int):
+    cursor.execute("SELECT 1 FROM parent_child WHERE parent_id = ? AND child_id = ?", (parent_id, child_id))
+    return bool(cursor.fetchone())
