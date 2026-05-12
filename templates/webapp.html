@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Расписание</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            margin: 0;
+            padding: 16px;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        .schedule-list {
+            list-style: none;
+            padding: 0;
+        }
+        .schedule-item {
+            background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+        }
+        .schedule-item strong {
+            display: block;
+            font-size: 1.1em;
+            margin-bottom: 4px;
+        }
+        .admin-panel {
+            display: none;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--tg-theme-hint-color, #cccccc);
+        }
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid var(--tg-theme-hint-color, #cccccc);
+            border-radius: 8px;
+            box-sizing: border-box;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+        }
+        button {
+            background-color: var(--tg-theme-button-color, #2481cc);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>📅 Расписание занятий</h1>
+
+    <div id="loading">Загрузка...</div>
+
+    <ul class="schedule-list" id="schedule-container">
+        <!-- Сюда подгрузится расписание -->
+    </ul>
+
+    <div class="admin-panel" id="admin-panel">
+        <h2>🛠 Добавить занятие (Админ)</h2>
+        <input type="text" id="day" placeholder="День недели (например, Понедельник)" required>
+        <input type="text" id="time" placeholder="Время (например, 15:00)" required>
+        <input type="text" id="subject" placeholder="Предмет (например, Математика)" required>
+        <input type="text" id="teacher" placeholder="Преподаватель" required>
+        <button id="add-btn">Добавить в расписание</button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        const userId = tg.initDataUnsafe?.user?.id;
+
+        async function loadSchedules() {
+            try {
+                const response = await fetch('/api/schedules');
+                const schedules = await response.json();
+
+                const container = document.getElementById('schedule-container');
+                container.innerHTML = '';
+
+                if (schedules.length === 0) {
+                     container.innerHTML = '<li>Нет запланированных занятий</li>';
+                } else {
+                    schedules.forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'schedule-item';
+                        li.innerHTML = `
+                            <strong>${item.day} - ${item.time}</strong>
+                            <div>📚 ${item.subject}</div>
+                            <div>👨‍🏫 ${item.teacher}</div>
+                        `;
+                        container.appendChild(li);
+                    });
+                }
+            } catch (e) {
+                console.error("Ошибка загрузки расписания:", e);
+                document.getElementById('schedule-container').innerHTML = '<li>Ошибка загрузки расписания</li>';
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        async function checkRole() {
+            const initData = tg.initData;
+            if (!initData) return;
+            try {
+                const response = await fetch(`/api/role?initData=${encodeURIComponent(initData)}`);
+                const data = await response.json();
+
+                if (data.role === 'admin') {
+                    document.getElementById('admin-panel').style.display = 'block';
+                }
+            } catch (e) {
+                console.error("Ошибка проверки роли:", e);
+            }
+        }
+
+        document.getElementById('add-btn').addEventListener('click', async () => {
+            const day = document.getElementById('day').value;
+            const time = document.getElementById('time').value;
+            const subject = document.getElementById('subject').value;
+            const teacher = document.getElementById('teacher').value;
+
+            if (!day || !time || !subject || !teacher) {
+                tg.showAlert('Пожалуйста, заполните все поля!');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        initData: tg.initData,
+                        day: day,
+                        time: time,
+                        subject: subject,
+                        teacher: teacher
+                    })
+                });
+
+                if (response.ok) {
+                    tg.showAlert('Занятие успешно добавлено!');
+                    document.getElementById('day').value = '';
+                    document.getElementById('time').value = '';
+                    document.getElementById('subject').value = '';
+                    document.getElementById('teacher').value = '';
+                    loadSchedules(); // Перезагрузить список
+                } else {
+                    const errorData = await response.json();
+                    tg.showAlert(`Ошибка: ${errorData.error}`);
+                }
+            } catch (e) {
+                tg.showAlert('Ошибка соединения с сервером');
+            }
+        });
+
+        // Инициализация
+        loadSchedules();
+        checkRole();
+    </script>
+</body>
+</html>

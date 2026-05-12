@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from config import COURSES, SPECIAL_OFFERS, GROUP_ID
 from states.forms import Registration
-from keyboards.inline import role_keyboard, offer_confirm_keyboard, courses_keyboard, close_topic_keyboard
+from keyboards.inline import role_keyboard, offer_confirm_keyboard, courses_keyboard, close_topic_keyboard, main_inline_menu
 from keyboards.reply import main_menu
 from database.db import get_thread, save_thread, get_user_role, save_user
 
@@ -32,6 +32,7 @@ async def start_cmd(message: types.Message, state: FSMContext):
     if saved_role:
         await state.update_data(user_role=saved_role)
         # Если роль известна, переходим сразу к делу
+        await message.answer("Добро пожаловать в CRM! Выберите нужное действие:", reply_markup=main_inline_menu())
         await proceed_to_offer_or_courses(message, state)
     else:
         # Если роли нет, спрашиваем
@@ -115,8 +116,10 @@ async def finish_registration(callback: types.CallbackQuery, state: FSMContext, 
     
     if direct_message:
         await msg.answer(success_text, parse_mode="HTML", reply_markup=main_menu())
+        await msg.answer("Также вы можете воспользоваться нашими сервисами:", reply_markup=main_inline_menu())
     else:
         await msg.edit_text(success_text, parse_mode="HTML")
+        await msg.message.answer("Также вы можете воспользоваться нашими сервисами:", reply_markup=main_inline_menu())
     
     report = (
         f"🚀 <b>НОВАЯ ЗАЯВКА С САЙТА</b>\n\n"
