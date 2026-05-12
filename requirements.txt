@@ -1,4 +1,1 @@
 aiogram
-aiohttp
-aiohttp-jinja2
-jinja2
