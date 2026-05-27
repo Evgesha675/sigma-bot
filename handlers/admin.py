@@ -1,115 +1,154 @@
-# handlers/admin.py
-import logging
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
-
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import GROUP_ID, ADMIN_IDS
-from database.db import get_user_by_thread, delete_thread, add_lesson, delete_lesson, clear_user_roles, add_user_role
+from database.db import get_user_roles, add_user_role, clear_user_roles, get_thread, save_thread
+from services.sheets import sheet_manager
+from keyboards.inline import role_keyboard, close_topic_keyboard
 from keyboards.reply import main_menu
-from keyboards.inline import admin_main_keyboard, admin_schedule_edit_keyboard, admin_roles_keyboard
-from states.forms import AdminPanelState
+from states.forms import Registration, BookingProcess
 
 router = Router()
 
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMIN_IDS
+def format_time(t_str):
+    return str(t_str)[:5]
 
-# --- 1. ПАНЕЛЬ УПРАВЛЕНИЯ ---
-@router.message(Command("admin"))
-@router.message(F.text == "⚙️ Админ-панель")
-async def show_admin_panel(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
+async def get_or_create_thread(bot, user):
+    tid = get_thread(user.id)
+    if not tid:
+        topic = await bot.create_forum_topic(GROUP_ID, user.full_name)
+        tid = topic.message_thread_id
+        save_thread(user.id, tid)
+    return tid
+
+# --- СТАРТ И РОЛИ ---
+@router.message(CommandStart())
+async def start(message: types.Message, command: CommandObject, state: FSMContext):
     await state.clear()
-    await message.answer("🛠 <b>Панель администратора</b>\nВыберите раздел для управления:", 
-                         reply_markup=admin_main_keyboard(), parse_mode="HTML")
+    sheet_manager.save_user(message.from_user.id, message.from_user.full_name)
+    if message.from_user.id in ADMIN_IDS:
+        return await message.answer("👑 Админ-панель", reply_markup=main_menu(["Администратор"]))
+    
+    roles = get_user_roles(message.from_user.id)
+    if roles:
+        await message.answer("С возвращением!", reply_markup=main_menu(roles))
+    else:
+        await message.answer("Здравствуйте! Выберите роль:", reply_markup=role_keyboard())
+        await state.set_state(Registration.choosing_roles)
 
-@router.callback_query(F.data == "admin_back")
-async def admin_back_handler(callback: types.CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("set_role_"))
+async def process_set_role(callback: types.CallbackQuery, state: FSMContext):
+    role = callback.data.split("_")[2]
+    clear_user_roles(callback.from_user.id)
+    add_user_role(callback.from_user.id, role)
+    await callback.answer("Принято!")
+    await callback.message.edit_text(f"✅ Роль {role} сохранена!")
+    await callback.message.answer("Главное меню:", reply_markup=main_menu([role]))
+
+# --- ОБЩАЯ ОТМЕНА ---
+@router.callback_query(F.data == "cancel_action")
+async def cancel_action(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("🛠 <b>Панель администратора</b>\nВыберите раздел:", 
-                                     reply_markup=admin_main_keyboard(), parse_mode="HTML")
+    await callback.answer("❌ Действие отменено")
+    roles = get_user_roles(callback.from_user.id)
+    
+    await callback.message.edit_text("Действие отменено.")
+    if roles:
+        await callback.message.answer("Главное меню:", reply_markup=main_menu(roles))
+    else:
+        await callback.message.answer("Выберите роль:", reply_markup=role_keyboard())
+        await state.set_state(Registration.choosing_roles)
 
-# --- 2. УПРАВЛЕНИЕ РАСПИСАНИЕМ ---
-@router.callback_query(F.data == "admin_schedule")
-async def admin_schedule_menu(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id): return
-    await callback.message.edit_text("📅 <b>Расписание:</b>\nНажмите на крестик, чтобы удалить занятие, или добавьте новое.", 
-                                     reply_markup=admin_schedule_edit_keyboard(), parse_mode="HTML")
+# --- ЛОГИКА ЗАПИСИ (ИНДЕКСНАЯ) ---
+@router.message(F.text == "📚 Расписание и запись")
+async def schedule(message: types.Message, state: FSMContext):
+    slots = sheet_manager.get_available_slots()
+    if not slots:
+        return await message.answer("😔 Пока нет свободных мест.")
+    
+    # Сохраняем уникальные курсы в состояние, чтобы не передавать длинные строки
+    courses = sorted(list({s['course_name'] for s in slots}))
+    await state.update_data(courses_list=courses)
+    
+    builder = InlineKeyboardBuilder()
+    for i, c in enumerate(courses):
+        builder.button(text=f"📚 {c}", callback_data=f"sel_course|{i}")
+    builder.button(text="❌ Отмена", callback_data="cancel_action")
+    await message.answer("Выберите курс:", reply_markup=builder.adjust(1).as_markup())
 
-@router.callback_query(F.data == "admin_add_lesson")
-async def admin_add_lesson_prompt(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id): return
-    await callback.message.edit_text(
-        "Введите данные нового занятия в формате:\n\n"
-        "<code>Название | ДД.ММ в ЧЧ:ММ | Количество мест</code>\n\n"
-        "<i>Пример: Робототехника | 20 мая в 15:00 | 10</i>", 
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminPanelState.waiting_for_lesson_data)
-
-@router.message(AdminPanelState.waiting_for_lesson_data, F.text)
-async def admin_save_lesson(message: types.Message, state: FSMContext):
-    try:
-        parts = message.text.split("|")
-        name = parts[0].strip()
-        dt = parts[1].strip()
-        spots = int(parts[2].strip())
+@router.callback_query(F.data.startswith("sel_course|"))
+async def select_course(callback: types.CallbackQuery, state: FSMContext):
+    index = int(callback.data.split("|")[1])
+    data = await state.get_data()
+    courses = data.get("courses_list")
+    
+    if not courses: # Если FSM слетел
+        return await cancel_action(callback, state)
         
-        add_lesson(name, dt, spots)
-        await message.answer(f"✅ Занятие <b>{name}</b> успешно добавлено!", parse_mode="HTML")
-    except Exception:
-        await message.answer("❌ Ошибка формата. Попробуйте снова через админ-панель.")
-    await state.clear()
-
-@router.callback_query(F.data.startswith("admin_del_lesson_"))
-async def admin_del_lesson(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id): return
-    lesson_id = int(callback.data.split("_")[3])
-    delete_lesson(lesson_id)
-    await callback.answer("Занятие удалено!", show_alert=True)
-    await callback.message.edit_reply_markup(reply_markup=admin_schedule_edit_keyboard())
-
-# --- 3. УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (ВЫДАЧА РОЛЕЙ) ---
-@router.callback_query(F.data == "admin_users")
-async def admin_users_menu(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id): return
-    await callback.message.edit_text("Отправьте мне <b>Telegram ID</b> пользователя, которому нужно выдать роль:", parse_mode="HTML")
-    await state.set_state(AdminPanelState.waiting_for_user_id)
-
-@router.message(AdminPanelState.waiting_for_user_id, F.text)
-async def admin_get_user_id(message: types.Message, state: FSMContext):
-    try:
-        target_id = int(message.text.strip())
-        await message.answer(f"Выберите роль для ID <code>{target_id}</code>:", 
-                             reply_markup=admin_roles_keyboard(target_id), parse_mode="HTML")
-    except ValueError:
-        await message.answer("❌ Неверный ID. Это должны быть только цифры.")
-    await state.clear()
-
-@router.callback_query(F.data.startswith("admin_setrole_"))
-async def admin_set_role(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id): return
-    parts = callback.data.split("_")
-    target_id = int(parts[2])
-    role = parts[3]
+    course_name = courses[index]
+    await state.update_data(course=course_name)
     
-    clear_user_roles(target_id)
-    add_user_role(target_id, role)
+    # Фильтруем слоты именно для этого курса
+    slots = [s for s in sheet_manager.get_available_slots() if s['course_name'] == course_name]
+    await state.update_data(slots_list=slots) # Сохраняем слоты
     
-    await callback.message.edit_text(f"✅ Пользователю с ID <code>{target_id}</code> выдана роль <b>{role}</b>.", parse_mode="HTML")
+    builder = InlineKeyboardBuilder()
+    for i, s in enumerate(slots):
+        t = format_time(s['time'])
+        builder.button(text=f"📅 {s['date']} | ⏰ {t}", callback_data=f"book_time|{i}")
+    
+    builder.button(text="🔙 Назад", callback_data="back_to_courses")
+    builder.button(text="❌ Отмена", callback_data="cancel_action")
+    await callback.message.edit_text(f"Курс: <b>{course_name}</b>\nВыберите время:", 
+                                     reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
     await callback.answer()
 
-# --- СТАРАЯ ФУНКЦИЯ ЗАКРЫТИЯ ТОПИКА ИЗ CRM ---
-@router.callback_query(F.data.startswith("close_"))
-async def close_callback(callback: types.CallbackQuery):
-    user_id = int(callback.data.split("_")[1])
-    try:
-        await callback.bot.send_message(user_id, "<b>Ваш диалог с менеджером завершен.</b>", parse_mode="HTML", reply_markup=main_menu())
-        await callback.bot.close_forum_topic(GROUP_ID, callback.message.message_thread_id)
-        delete_thread(user_id)
-        await callback.message.edit_text(callback.message.text + "\n\n✅ <b>ДИАЛОГ ЗАКРЫТ</b>", parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"Ошибка закрытия: {e}")
+@router.callback_query(F.data == "back_to_courses")
+async def back_to_courses(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    # Просто вызываем функцию schedule, передав message
+    await schedule(callback.message, state)
     await callback.answer()
+
+@router.callback_query(F.data.startswith("book_time|"))
+async def book_time(callback: types.CallbackQuery, state: FSMContext):
+    index = int(callback.data.split("|")[1])
+    data = await state.get_data()
+    
+    slot = data['slots_list'][index]
+    await state.update_data(d=slot['date'], t=format_time(slot['time']))
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="cancel_action")
+    await callback.message.edit_text("Введите Имя и телефон для записи:", reply_markup=builder.as_markup())
+    await state.set_state(BookingProcess.waiting_for_child_name)
+    await callback.answer()
+
+@router.message(BookingProcess.waiting_for_child_name)
+async def booking_final(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    sheet_manager.book_slot(message.from_user.id, message.from_user.full_name, 
+                            data.get("course"), data['d'], data['t'], message.text, "Клиент")
+    await message.answer("✅ Записали!")
+    tid = await get_or_create_thread(message.bot, message.from_user)
+    msg = f"🚀 <b>ЗАПИСЬ</b>\nКурс: {data.get('course')}\n📅 {data['d']} {data['t']}\n👤 Данные: {message.text}"
+    await message.bot.send_message(GROUP_ID, msg, message_thread_id=tid, 
+                                   reply_markup=close_topic_keyboard(message.from_user.id), parse_mode="HTML")
+    await state.clear()
+
+# --- СВЯЗЬ И ОПЛАТА ---
+@router.message(F.text == "💬 Связь с менеджером")
+async def contact(message: types.Message):
+    await message.answer("⏳ Минутку, открываю диалог...")
+    tid = await get_or_create_thread(message.bot, message.from_user)
+    await message.bot.send_message(GROUP_ID, f"📩 Запрос от {message.from_user.full_name}", 
+                                   message_thread_id=tid, reply_markup=close_topic_keyboard(message.from_user.id))
+    await message.answer("✅ Менеджер уведомлен! Пишите вопрос сюда.")
+
+@router.message(F.text == "💳 Оплата")
+async def payment(message: types.Message):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="cancel_action")
+    await message.answer("💳 <b>Оплата</b>\n\nПришлите скриншот чека и ФИО ребенка.", 
+                         reply_markup=builder.as_markup(), parse_mode="HTML")
