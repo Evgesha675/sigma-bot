@@ -1,40 +1,30 @@
 # keyboards/inline.py
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from config import COURSES, GOOGLE_SCHEDULE_URL, COMMON_CHAT_URL
+from database.db import get_available_lessons
 
-def role_keyboard(selected_roles: list = None):
-    if selected_roles is None:
-        selected_roles = []
-
+def role_keyboard():
     builder = InlineKeyboardBuilder()
-
-    parent_text = "✅ Я Родитель 👨‍👩‍👧" if "Родитель" in selected_roles else "Я Родитель 👨‍👩‍👧"
-    student_text = "✅ Я Ученик 🎓" if "Ученик" in selected_roles else "Я Ученик 🎓"
-    teacher_text = "✅ Я Преподаватель 👨‍🏫" if "Преподаватель" in selected_roles else "Я Преподаватель 👨‍🏫"
-    mod_text = "✅ Я Модератор 🛡" if "Модератор" in selected_roles else "Я Модератор 🛡"
-
-    builder.button(text=parent_text, callback_data="toggle_role_Родитель")
-    builder.button(text=student_text, callback_data="toggle_role_Ученик")
-    builder.button(text=teacher_text, callback_data="toggle_role_Преподаватель")
-    builder.button(text=mod_text, callback_data="toggle_role_Модератор")
-
-    if selected_roles:
-        builder.button(text="➡️ Завершить выбор ролей", callback_data="finish_roles")
-
+    builder.button(text="👨‍👩‍👧 Я Родитель", callback_data="set_role_Родитель")
+    builder.button(text="🎓 Я Ученик", callback_data="set_role_Ученик")
     builder.adjust(1)
     return builder.as_markup()
 
-def offer_confirm_keyboard():
+def schedule_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="Да, хочу узнать подробности! ✅", callback_data="confirm_offer_yes")
-    builder.button(text="Нет, посмотреть все курсы 📚", callback_data="confirm_offer_no")
+    lessons = get_available_lessons()
+    for lesson in lessons:
+        lesson_id, name, dt, total, booked = lesson
+        available = total - booked
+        if available > 0:
+            builder.button(text=f"{name} | {dt} (Мест: {available})", callback_data=f"book_{lesson_id}")
+        else:
+            builder.button(text=f"❌ {name} | {dt} (МЕСТ НЕТ)", callback_data="lesson_full")
+    builder.adjust(1)
     return builder.as_markup()
 
-def courses_keyboard():
+def cancel_booking_keyboard(lesson_id: int):
     builder = InlineKeyboardBuilder()
-    for code, name in COURSES.items():
-        builder.button(text=name, callback_data=f"course_{code}")
-    builder.adjust(1) # Все кнопки в один столбец для удобства на телефоне
+    builder.button(text="❌ Отменить запись", callback_data=f"cancel_{lesson_id}")
     return builder.as_markup()
 
 def close_topic_keyboard(user_id: int):
@@ -42,9 +32,28 @@ def close_topic_keyboard(user_id: int):
     builder.button(text="✅ Завершить диалог", callback_data=f"close_{user_id}")
     return builder.as_markup()
 
-def main_inline_menu():
+def admin_main_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="🗓 Расписание и ДЗ (Google Schedule)", url=GOOGLE_SCHEDULE_URL)
-    builder.button(text="💬 Общий чат", url=COMMON_CHAT_URL)
+    builder.button(text="📅 Управление расписанием", callback_data="admin_schedule")
+    builder.button(text="👥 Управление пользователями", callback_data="admin_users")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def admin_schedule_edit_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Добавить занятие", callback_data="admin_add_lesson")
+    lessons = get_available_lessons()
+    for lesson in lessons:
+        lesson_id, name, dt, _, _ = lesson
+        builder.button(text=f"❌ Удалить: {name} | {dt}", callback_data=f"admin_del_lesson_{lesson_id}")
+    builder.button(text="🔙 Назад", callback_data="admin_back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def admin_roles_keyboard(target_user_id: int):
+    builder = InlineKeyboardBuilder()
+    for role in ["Родитель", "Ученик", "Модератор"]:
+        builder.button(text=f"Выдать: {role}", callback_data=f"admin_setrole_{target_user_id}_{role}")
+    builder.button(text="🔙 Назад", callback_data="admin_back")
     builder.adjust(1)
     return builder.as_markup()

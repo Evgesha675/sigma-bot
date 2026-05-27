@@ -5,13 +5,23 @@ def main_menu(user_roles: list = None):
     if user_roles is None:
         user_roles = []
 
+    # Общее меню для всех
     kb = [
-        [KeyboardButton(text="📱 Главное меню / Направления")],
-        [KeyboardButton(text="🆔 Узнать свой ID")]
+        [KeyboardButton(text="📚 Расписание и запись")],
+        [KeyboardButton(text="💬 Связь с менеджером")]
     ]
 
+    # Кнопка только для родителя
     if "Родитель" in user_roles:
-        kb.append([KeyboardButton(text="👨‍👧 Мои дети"), KeyboardButton(text="💳 Оплата")])
-        kb.append([KeyboardButton(text="🔗 Привязать ребенка")])
+        kb.append([KeyboardButton(text="💳 Оплата")])
 
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, input_field_placeholder="Выберите действие")
+    # --- ВОТ СЮДА ДОБАВЛЯЕМ КНОПКУ АДМИНА ---
+    if "Администратор" in user_roles:
+        kb.append([KeyboardButton(text="⚙️ Админ-панель")])
+
+    # Возвращаем готовую клавиатуру
+    return ReplyKeyboardMarkup(
+        keyboard=kb, 
+        resize_keyboard=True, 
+        input_field_placeholder="Выберите действие ниже 👇"
+    )
